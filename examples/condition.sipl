@@ -1,0 +1,4 @@
+begin
+  if ¬(X > 0) ∨ Y = 0 then R := (X + 1) * 2 else skip;
+  S := -1
+end

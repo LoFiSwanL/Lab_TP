@@ -1,0 +1,39 @@
+// P1; S1-S6; A1-A6; B1-B5. See docs/syntax.md for precedence and lexing.
+program: _BEGIN statement _END
+
+?statement: statement ";" simple  -> sequence
+          | simple
+?simple: NAME ":=" arithmetic     -> assignment
+       | _IF condition _THEN simple _ELSE simple -> if_statement
+       | _WHILE condition _DO simple -> while_statement
+       | _BEGIN statement _END  -> block
+       | _SKIP                   -> skip
+
+?arithmetic: arithmetic "+" product -> add
+           | arithmetic "-" product -> sub
+           | product
+?product: product "*" atom          -> mult
+        | atom
+?atom: INTEGER                     -> number
+     | NAME                        -> variable
+     | "(" arithmetic ")"         -> arithmetic_group
+
+?condition: condition "∨" negated  -> disjunction
+          | negated
+?negated: "¬" negated               -> negation
+        | arithmetic "=" arithmetic -> equal
+        | arithmetic ">" arithmetic -> greater
+        | "(" condition ")"         -> boolean_group
+
+NAME: /(?!(?:begin|end|if|then|else|while|do|skip)\b)[A-Za-z][A-Za-z0-9]*/
+INTEGER: /-?[0-9]+(?![A-Za-z0-9])/
+%import common.WS
+%ignore WS
+_BEGIN: /begin(?![A-Za-z0-9])/
+_END: /end(?![A-Za-z0-9])/
+_IF: /if(?![A-Za-z0-9])/
+_THEN: /then(?![A-Za-z0-9])/
+_ELSE: /else(?![A-Za-z0-9])/
+_WHILE: /while(?![A-Za-z0-9])/
+_DO: /do(?![A-Za-z0-9])/
+_SKIP: /skip(?![A-Za-z0-9])/

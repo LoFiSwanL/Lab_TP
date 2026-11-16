@@ -1,0 +1,1 @@
+IF(S²(or, S¹(neg, S²(gr, X⇒, 0̄)), S²(eq, Y⇒, 0̄)), AS^R(S²(mult, S²(add, X⇒, 1̄), 2̄)), id) · AS^S(-1̄)

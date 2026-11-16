@@ -1,0 +1,551 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SIPL CLI result, version 1",
+  "$defs": {
+    "position": {
+      "type": "object",
+      "required": ["offset", "line", "column"],
+      "additionalProperties": false,
+      "properties": {
+        "offset": {"type": "integer", "minimum": 0},
+        "line": {"type": "integer", "minimum": 1},
+        "column": {"type": "integer", "minimum": 1}
+      }
+    },
+    "span": {
+      "type": "object",
+      "required": ["start", "end"],
+      "additionalProperties": false,
+      "properties": {"start": {"$ref": "#/$defs/position"}, "end": {"$ref": "#/$defs/position"}}
+    },
+    "state": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "message", "span", "expected"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {"type": "string"},
+        "message": {"type": "string"},
+        "span": {"oneOf": [{"$ref": "#/$defs/span"}, {"type": "null"}]},
+        "expected": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["kind", "step", "span", "state", "statement", "variable", "old_value", "new_value", "condition", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["BeforeStatement", "AfterStatement", "VariableChanged", "ConditionChecked", "ExecutionFinished"]},
+        "step": {"type": "integer", "minimum": 0},
+        "span": {"$ref": "#/$defs/span"},
+        "state": {"$ref": "#/$defs/state"},
+        "statement": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        "variable": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        "old_value": {"oneOf": [{"type": "integer"}, {"type": "null"}]},
+        "new_value": {"oneOf": [{"type": "integer"}, {"type": "null"}]},
+        "condition": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+        "status": {"oneOf": [{"enum": ["completed", "undefined", "limit"]}, {"type": "null"}]}
+      }
+    },
+    "proof": {
+      "type": "object",
+      "required": ["rule", "phase", "span", "state", "value", "subject", "iteration"],
+      "additionalProperties": false,
+      "properties": {
+        "rule": {"enum": ["AF_DNM", "AF_S", "AF_AS", "AF_SEQ", "AF_IF", "AF_WH", "AF_ID"]},
+        "phase": {
+          "enum": ["lookup", "value", "apply", "before", "after", "between", "condition", "after_iteration", "same_state"]
+        },
+        "span": {"$ref": "#/$defs/span"},
+        "state": {"$ref": "#/$defs/state"},
+        "value": {"oneOf": [{"type": "integer"}, {"type": "boolean"}, {"type": "null"}]},
+        "subject": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        "iteration": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}
+      }
+    },
+    "ast": {
+      "type": "object",
+      "required": ["kind", "span", "body"],
+      "additionalProperties": false,
+      "properties": {"kind": {"const": "Program"}, "span": {"$ref": "#/$defs/span"}, "body": {"$ref": "#/$defs/statement"}}
+    },
+    "arithmetic": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "span", "value"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Integer"}, "span": {"$ref": "#/$defs/span"}, "value": {"type": "integer"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "name"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Variable"}, "span": {"$ref": "#/$defs/span"}, "name": {"type": "string"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "op", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "ArithmeticBinary"},
+            "span": {"$ref": "#/$defs/span"},
+            "op": {"enum": ["+", "-", "*"]},
+            "left": {"$ref": "#/$defs/arithmetic"},
+            "right": {"$ref": "#/$defs/arithmetic"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "expression"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "ArithmeticGroup"},
+            "span": {"$ref": "#/$defs/span"},
+            "expression": {"$ref": "#/$defs/arithmetic"}
+          }
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "span", "op", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Comparison"},
+            "span": {"$ref": "#/$defs/span"},
+            "op": {"enum": ["=", ">"]},
+            "left": {"$ref": "#/$defs/arithmetic"},
+            "right": {"$ref": "#/$defs/arithmetic"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Disjunction"},
+            "span": {"$ref": "#/$defs/span"},
+            "left": {"$ref": "#/$defs/condition"},
+            "right": {"$ref": "#/$defs/condition"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "operand"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Negation"}, "span": {"$ref": "#/$defs/span"}, "operand": {"$ref": "#/$defs/condition"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "condition"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "BooleanGroup"},
+            "span": {"$ref": "#/$defs/span"},
+            "condition": {"$ref": "#/$defs/condition"}
+          }
+        }
+      ]
+    },
+    "statement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "span", "target", "expression"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Assignment"},
+            "span": {"$ref": "#/$defs/span"},
+            "target": {
+              "type": "object",
+              "required": ["kind", "span", "name"],
+              "additionalProperties": false,
+              "properties": {"kind": {"const": "Variable"}, "span": {"$ref": "#/$defs/span"}, "name": {"type": "string"}}
+            },
+            "expression": {"$ref": "#/$defs/arithmetic"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "first", "second"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Sequence"},
+            "span": {"$ref": "#/$defs/span"},
+            "first": {"$ref": "#/$defs/statement"},
+            "second": {"$ref": "#/$defs/statement"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "condition", "then_branch", "else_branch"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "If"},
+            "span": {"$ref": "#/$defs/span"},
+            "condition": {"$ref": "#/$defs/condition"},
+            "then_branch": {"$ref": "#/$defs/statement"},
+            "else_branch": {"$ref": "#/$defs/statement"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "condition", "body"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "While"},
+            "span": {"$ref": "#/$defs/span"},
+            "condition": {"$ref": "#/$defs/condition"},
+            "body": {"$ref": "#/$defs/statement"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "body"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Block"}, "span": {"$ref": "#/$defs/span"}, "body": {"$ref": "#/$defs/statement"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Skip"}, "span": {"$ref": "#/$defs/span"}}
+        }
+      ]
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "span", "number"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Constant"}, "span": {"$ref": "#/$defs/span"}, "number": {"type": "integer"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "name"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Dereference"}, "span": {"$ref": "#/$defs/span"}, "name": {"type": "string"}}
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "function", "operands"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Superposition"},
+            "span": {"$ref": "#/$defs/span"},
+            "function": {"enum": ["add", "sub", "mult", "eq", "gr", "or", "neg"]},
+            "operands": {"type": "array", "items": {"$ref": "#/$defs/expression"}}
+          }
+        }
+      ]
+    },
+    "term": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "span", "name", "expression"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Assign"},
+            "span": {"$ref": "#/$defs/span"},
+            "name": {"type": "string"},
+            "expression": {"$ref": "#/$defs/expression"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "first", "second"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Compose"},
+            "span": {"$ref": "#/$defs/span"},
+            "first": {"$ref": "#/$defs/term"},
+            "second": {"$ref": "#/$defs/term"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "condition", "when_true", "when_false"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Select"},
+            "span": {"$ref": "#/$defs/span"},
+            "condition": {"$ref": "#/$defs/expression"},
+            "when_true": {"$ref": "#/$defs/term"},
+            "when_false": {"$ref": "#/$defs/term"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span", "condition", "body"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "Iterate"},
+            "span": {"$ref": "#/$defs/span"},
+            "condition": {"$ref": "#/$defs/expression"},
+            "body": {"$ref": "#/$defs/term"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "span"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "Identity"}, "span": {"$ref": "#/$defs/span"}}
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["check"]},
+        "status": {"const": "ok"},
+        "result": {"type": "object", "required": [], "additionalProperties": false, "properties": {}},
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["parse"]},
+        "status": {"const": "ok"},
+        "result": {
+          "type": "object",
+          "required": ["ast"],
+          "additionalProperties": false,
+          "properties": {"ast": {"$ref": "#/$defs/ast"}}
+        },
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["term"]},
+        "status": {"const": "ok"},
+        "result": {
+          "type": "object",
+          "required": ["term", "notation"],
+          "additionalProperties": false,
+          "properties": {"term": {"$ref": "#/$defs/term"}, "notation": {"type": "string"}}
+        },
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["check", "parse", "run", "trace", "term", "eval"]},
+        "status": {"const": "error"},
+        "result": {"type": "object", "required": [], "additionalProperties": false, "properties": {}},
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["check", "parse", "run", "trace", "term", "eval"]},
+        "status": {"const": "limit"},
+        "result": {"type": "object", "required": [], "additionalProperties": false, "properties": {}},
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["run"]},
+        "status": {"const": "completed"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state"],
+          "additionalProperties": false,
+          "properties": {"steps": {"type": "integer", "minimum": 0}, "final_state": {"$ref": "#/$defs/state"}}
+        },
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["run"]},
+        "status": {"const": "undefined"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state"],
+          "additionalProperties": false,
+          "properties": {"steps": {"type": "integer", "minimum": 0}, "final_state": {"type": "null"}}
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["run"]},
+        "status": {"const": "limit"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state"],
+          "additionalProperties": false,
+          "properties": {"steps": {"type": "integer", "minimum": 0}, "final_state": {"type": "null"}}
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["trace"]},
+        "status": {"const": "completed"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "events"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"$ref": "#/$defs/state"},
+            "events": {"type": "array", "items": {"$ref": "#/$defs/event"}}
+          }
+        },
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["trace"]},
+        "status": {"const": "undefined"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "events"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"type": "null"},
+            "events": {"type": "array", "items": {"$ref": "#/$defs/event"}}
+          }
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["trace"]},
+        "status": {"const": "limit"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "events"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"type": "null"},
+            "events": {"type": "array", "items": {"$ref": "#/$defs/event"}}
+          }
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["eval"]},
+        "status": {"const": "completed"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "proof"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"$ref": "#/$defs/state"},
+            "proof": {"type": "array", "items": {"$ref": "#/$defs/proof"}}
+          }
+        },
+        "diagnostic": {"type": "null"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["eval"]},
+        "status": {"const": "undefined"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "proof"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"type": "null"},
+            "proof": {"type": "array", "items": {"$ref": "#/$defs/proof"}}
+          }
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "command", "status", "result", "diagnostic"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": 1},
+        "command": {"enum": ["eval"]},
+        "status": {"const": "limit"},
+        "result": {
+          "type": "object",
+          "required": ["steps", "final_state", "proof"],
+          "additionalProperties": false,
+          "properties": {
+            "steps": {"type": "integer", "minimum": 0},
+            "final_state": {"type": "null"},
+            "proof": {"type": "array", "items": {"$ref": "#/$defs/proof"}}
+          }
+        },
+        "diagnostic": {"$ref": "#/$defs/diagnostic"}
+      }
+    }
+  ]
+}
